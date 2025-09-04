@@ -1,20 +1,12 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import * as React from 'react';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import Image from 'next/image';
-import gsap from 'gsap';
-import { ScrollTrigger } from 'gsap/ScrollTrigger';
-
-gsap.registerPlugin(ScrollTrigger);
-
-const MEDIA_PCT_COMPACT = 34;
-const MEDIA_PCT_FOCUS   = 60;
-const VIEWPORT_H_COMPACT = 110;
-const VIEWPORT_H_FOCUS   = 340;
-const COMPACT_H  = 120;
-const EXPANDED_H = 560;
+import { motion, AnimatePresence } from 'framer-motion';
+import { Plus, Minus } from 'lucide-react';
 
 export type Project = {
   id: string;
@@ -22,117 +14,75 @@ export type Project = {
   blurb: string;
   tools: string[];
   skills: string[];
-  shot: string;
+  shot: string; // image path in /public
+  url: string;  // target link
 };
 
-type AnimatedCardProps = { project: Project };
+type AnimatedCardProps = {
+  project: Project;
+  defaultOpen?: boolean;
+};
 
-export default function AnimatedCard({ project }: AnimatedCardProps) {
-  const el = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!el.current) return;
-
-    const ctx = gsap.context(() => {
-      const card     = el.current as HTMLDivElement;
-      const inner    = card.querySelector<HTMLElement>('.work-inner');
-      const grid     = card.querySelector<HTMLElement>('.work-grid');
-      const viewport = card.querySelector<HTMLElement>('.media-viewport');
-      if (!inner || !grid || !viewport) return;
-
-      // Base compact styles
-      gsap.set(card,     { height: COMPACT_H, borderRadius: 16, opacity: 0.95 });
-      gsap.set(inner,    { scale: 0.96, opacity: 0.92 });
-      gsap.set(grid as any,     { '--media': MEDIA_PCT_COMPACT } as any);
-      gsap.set(viewport as any, { '--vh': VIEWPORT_H_COMPACT } as any);
-
-      // Open-state timeline
-      const tl = gsap.timeline({ paused: true });
-      tl.to(card, {
-          height: EXPANDED_H,
-          opacity: 1,
-          boxShadow: '0 16px 48px rgba(0,0,0,0.28)',
-          duration: 0.8,
-          ease: 'power2.out',
-        }, 0)
-        .to(inner, { scale: 1, opacity: 1, duration: 0.7, ease: 'power2.out' }, 0)
-        .to(grid as any,     { '--media': MEDIA_PCT_FOCUS, duration: 0.8, ease: 'power2.out' } as any, 0)
-        .to(viewport as any, { '--vh': VIEWPORT_H_FOCUS,   duration: 0.8, ease: 'power2.out' } as any, 0);
-
-      // Tight, center-biased activation band
-      const trig = ScrollTrigger.create({
-        trigger: card,
-        start: 'top center+=140',     // don’t activate until the card is more centered
-        end:   'bottom center-=140',  // deactivate a bit before it leaves center
-        invalidateOnRefresh: true,
-        onToggle(self) {
-          gsap.to(tl, { progress: self.isActive ? 1 : 0, duration: 0.55, ease: 'power2.out' });
-        },
-        onRefresh(self) {
-          gsap.set(tl, { progress: self.isActive ? 1 : 0 });
-        },
-      });
-
-      return () => {
-        trig.kill();
-        tl.kill();
-      };
-    }, el);
-
-    return () => ctx.revert();
-  }, []);
+export default function AnimatedCard({ project, defaultOpen = false }: AnimatedCardProps) {
+  const [open, setOpen] = React.useState(defaultOpen);
+  const regionId = React.useId();
 
   return (
     <Card
-      ref={el}
-      className="work-card overflow-hidden border border-white/10 bg-white/5 rounded-xl"
+      className="overflow-hidden border border-white/10 bg-white/5 rounded-xl backdrop-blur-[1px]"
       style={{ willChange: 'transform, height, opacity' }}
     >
       <CardContent className="p-0">
-        <div className="work-inner">
-          <div
-            className="work-grid grid h-full"
-            style={
-              {
-                ['--media' as any]: MEDIA_PCT_COMPACT,
-                gridTemplateColumns:
-                  'minmax(0, calc(var(--media) * 1%)) minmax(0, calc(100% - var(--media) * 1%))',
-                gap: 0,
-              } as React.CSSProperties
-            }
+        {/* Summary row (always visible) */}
+        <div className="flex items-start gap-4 p-4 md:p-5">
+          <div className="flex-1 min-w-0">
+            <h3 className="text-xl md:text-2xl font-semibold text-white truncate">
+              {project.title}
+            </h3>
+            <p className="mt-1 text-white/90">
+              {project.blurb}
+            </p>
+          </div>
+
+          {/* Toggle button (circle, spins icon on change) */}
+          <motion.div
+            initial={false}
+            animate={{ rotate: open ? 360 : 0 }}
+            transition={{ duration: 0.45, ease: 'easeOut' }}
           >
-            <div className="work-media relative">
-              <div
-                className="media-viewport relative overflow-hidden rounded-md ring-1 ring-white/10 bg-white/5"
-                style={
-                  {
-                    ['--vh' as any]: VIEWPORT_H_COMPACT,
-                    height: 'calc(var(--vh) * 1px)',
-                  } as React.CSSProperties
-                }
-              >
-                <Image
-                  src={project.shot}
-                  alt={`${project.title} preview`}
-                  fill
-                  sizes="(max-width: 1024px) 40vw, 480px"
-                  className="object-cover"
-                  priority={false}
-                />
-              </div>
-            </div>
+            <Button
+              type="button"
+              size="icon"
+              className="h-10 w-10 rounded-full bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur"
+              aria-expanded={open}
+              aria-controls={regionId}
+              onClick={() => setOpen((v) => !v)}
+            >
+              {open ? <Minus className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
+              <span className="sr-only">{open ? 'Collapse' : 'Expand'}</span>
+            </Button>
+          </motion.div>
+        </div>
 
-            <div className="p-4 md:p-5">
-              <CardHeader className="p-0">
-                <CardTitle className="text-2xl text-white">{project.title}</CardTitle>
-              </CardHeader>
-              <p className="mt-2 text-white">{project.blurb}</p>
-
-              <div className="mt-3 flex flex-wrap gap-2">
+        {/* Expandable area */}
+        <AnimatePresence initial={false}>
+          {open && (
+            <motion.div
+              key="content"
+              id={regionId}
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{
+                height: { duration: 0.45, ease: 'easeInOut' },
+                opacity: { duration: 0.3 }
+              }}
+              className="px-4 pb-4 md:px-5 md:pb-5"
+            >
+              {/* Badges FIRST */}
+              <div className="flex flex-wrap gap-2">
                 {project.tools.map((t) => (
-                  <Badge key={t} className="bg-white/15 text-white">
-                    {t}
-                  </Badge>
+                  <Badge key={t} className="bg-white/15 text-white">{t}</Badge>
                 ))}
               </div>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -142,9 +92,29 @@ export default function AnimatedCard({ project }: AnimatedCardProps) {
                   </Badge>
                 ))}
               </div>
-            </div>
-          </div>
-        </div>
+
+              {/* Linked image with hover scale */}
+              <a
+                href={project.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group mt-4 block"
+                aria-label={`${project.title} – open site in a new tab`}
+              >
+                <div className="relative overflow-hidden rounded-md ring-1 ring-white/10 bg-white/5 aspect-[16/10]">
+                  <Image
+                    src={project.shot}
+                    alt={`${project.title} preview`}
+                    fill
+                    sizes="(max-width: 1024px) 100vw, 800px"
+                    className="object-cover transition-transform duration-300 ease-out group-hover:scale-105"
+                    priority={false}
+                  />
+                </div>
+              </a>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </CardContent>
     </Card>
   );

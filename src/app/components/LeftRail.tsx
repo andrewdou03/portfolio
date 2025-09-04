@@ -12,31 +12,107 @@ export default function LeftRail({ sections }: { sections: SectionDef[] }) {
   const rail = useRef<HTMLDivElement>(null);
   const progress = useRef<HTMLDivElement>(null);
 
+  // Align the fixed rail to its parent grid column (parent wrapper must be `relative`)
+  useLayoutEffect(() => {
+    if (!rail.current) return;
+
+    const align = () => {
+      const parent = rail.current!.parentElement;
+      if (!parent) return;
+      const rect = parent.getBoundingClientRect();
+      rail.current!.style.left = `${rect.left}px`;
+      rail.current!.style.width = `${rect.width}px`;
+    };
+
+    align();
+    const parent = rail.current.parentElement!;
+    const ro = new ResizeObserver(align);
+    ro.observe(parent);
+    window.addEventListener('resize', align, { passive: true });
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', align);
+    };
+  }, []);
+
+  // Click label/dot → scroll so anchor sits at viewport center
+  const scrollToSection = (id: string) => {
+    const sec = document.getElementById(id);
+    if (!sec) return;
+    const anchor =
+      (sec.querySelector('[data-rail-anchor]') as HTMLElement) ||
+      (sec.querySelector('h2') as HTMLElement) ||
+      sec;
+
+    const rect = anchor.getBoundingClientRect();
+    const target =
+      rect.top + window.scrollY - window.innerHeight / 2 + rect.height / 2;
+    window.scrollTo({ top: target, behavior: 'smooth' });
+  };
+
   useLayoutEffect(() => {
     if (!rail.current || !progress.current) return;
 
     const ctx = gsap.context(() => {
       const dots   = gsap.utils.toArray<HTMLDivElement>('.rail-dot');
       const labels = gsap.utils.toArray<HTMLSpanElement>('.rail-label');
+      const n = Math.max(1, dots.length);
 
-      const n   = Math.max(1, dots.length);
-      const eps = 1e-4;
-
-      // Evenly spaced thresholds by index, padded away from edges
+      // Evenly spaced thresholds along the bar (0..1) with padding
       const padLo = 0.02, padHi = 0.96;
-      const thresholds = n === 1
-        ? [0.5]
-        : Array.from({ length: n }, (_, i) => padLo + (padHi - padLo) * (i / (n - 1)));
+      const thresholds =
+        n === 1
+          ? [0.5]
+          : Array.from({ length: n }, (_, i) => padLo + (padHi - padLo) * (i / (n - 1)));
 
-      let prevProgress = 0; // last progress 0..1
-      let activeIndex  = -1;
+      // --- Anchors (support data-rail-offset="40vh|320px|number") ---
+      type Anchor = { id: string; el: HTMLElement; y: number };
+      let anchors: Anchor[] = [];
 
-      // Keep one item active (hard-set so it persists and doesn’t fight tweens)
+      const getAnchorFor = (id: string): HTMLElement | null => {
+        const sec = document.getElementById(id);
+        if (!sec) return null;
+        const explicit = sec.querySelector('[data-rail-anchor]') as HTMLElement | null;
+        if (explicit) return explicit;
+        const h2 = sec.querySelector('h2') as HTMLElement | null;
+        return h2 || sec;
+      };
+
+      const getOffsetPx = (el: HTMLElement): number => {
+        const raw = el.getAttribute('data-rail-offset')?.trim();
+        if (!raw) return 0;
+        if (raw.endsWith('vh'))  return (window.innerHeight * parseFloat(raw)) / 100 || 0;
+        if (raw.endsWith('px'))  return parseFloat(raw) || 0;
+        return parseFloat(raw) || 0;
+      };
+
+      const measure = () => {
+        const scrollY = document.scrollingElement?.scrollTop ?? window.scrollY;
+        anchors = sections
+          .map((s) => {
+            const el = getAnchorFor(s.id);
+            return el ? { id: s.id, el, y: 0 } : null;
+          })
+          .filter(Boolean) as Anchor[];
+
+        anchors.forEach((a) => {
+          const r = a.el.getBoundingClientRect();
+          a.y = r.top + scrollY + getOffsetPx(a.el);
+        });
+        anchors.sort((a, b) => a.y - b.y);
+      };
+
+      // --- Activation (only after crossing each dot's threshold) ---
+      let activeIndex = -1;
+      let lastCrossed = -1;
+
       const setActive = (idx: number) => {
         if (idx === activeIndex) return;
 
         if (activeIndex >= 0) {
-          const oldDot = dots[activeIndex], oldLab = labels[activeIndex];
+          const oldDot = dots[activeIndex];
+          const oldLab = labels[activeIndex];
           if (oldDot && oldLab) {
             gsap.killTweensOf([oldDot, oldLab]);
             gsap.set(oldDot, { scale: 1 });
@@ -45,115 +121,90 @@ export default function LeftRail({ sections }: { sections: SectionDef[] }) {
         }
 
         if (idx >= 0) {
-          const newDot = dots[idx], newLab = labels[idx];
+          const newDot = dots[idx];
+          const newLab = labels[idx];
           if (newDot && newLab) {
             gsap.killTweensOf([newDot, newLab]);
             gsap.set(newDot, { scale: 1.15 });
-            gsap.set(newLab, { scale: 1.08, color: '#fff' });
+            gsap.set(newLab, { scale: 1.3, color: '#fff' }); // transform only; origin-left on the element
           }
         }
 
         activeIndex = idx;
       };
 
-      // Pop + sparkle on crossing (downward only), starting from current scale
-      const hit = (i: number) => {
-        const dot = dots[i], lab = labels[i];
-        if (!dot || !lab) return;
+      // --- Update: compute fill t, set bar, choose highest crossed threshold ---
+      const update = () => {
+        if (!progress.current || anchors.length === 0) return;
 
-        // read current transform scale so we don’t snap back to 1.0
-        const ds = Number(gsap.getProperty(dot, 'scale')) || 1;
-        const ls = Number(gsap.getProperty(lab, 'scale')) || 1;
+        const scrollY = document.scrollingElement?.scrollTop ?? window.scrollY;
 
-        gsap.killTweensOf([dot, lab]);
+        // When at the very bottom, visually fill to 100% to avoid a tiny gap
+        const doc = document.documentElement;
+        const maxScroll = doc.scrollHeight - window.innerHeight;
+        const isBottom = scrollY >= maxScroll - 2;
 
-        const tl = gsap.timeline({ defaults: { overwrite: 'auto' } });
-        tl.fromTo(dot, { scale: ds }, { scale: 1.35, duration: 0.18, ease: 'back.out(3)' })
-          .to(dot,       { scale: 1.15, duration: 0.14 }, '>-0.06')
-          .fromTo(lab,  { scale: ls }, { scale: 1.10, duration: 0.22, ease: 'back.out(2)' }, 0)
-          .to(lab,       { scale: 1.08, duration: 0.14 }, '>-0.06');
+        const midY = scrollY + window.innerHeight / 2;
 
-        // Sparkle burst at the dot center (viewport coords)
-        const r  = dot.getBoundingClientRect();
-        const cx = r.left + r.width / 2;
-        const cy = r.top  + r.height / 2;
-
-        const nPieces = 8;
-        const pieces: HTMLSpanElement[] = [];
-        for (let k = 0; k < nPieces; k++) {
-          const sp = document.createElement('span');
-          sp.className = 'spark';
-          document.body.appendChild(sp);
-          pieces.push(sp);
+        let t: number;
+        if (midY <= anchors[0].y) {
+          t = thresholds[0];
+        } else if (midY >= anchors[anchors.length - 1].y) {
+          t = thresholds[thresholds.length - 1];
+        } else {
+          let i = 0;
+          while (i < anchors.length - 1 && !(anchors[i].y <= midY && midY < anchors[i + 1].y)) i++;
+          const a0 = anchors[i], a1 = anchors[i + 1];
+          const u = (midY - a0.y) / Math.max(1, (a1.y - a0.y)); // 0..1
+          t = gsap.utils.interpolate(thresholds[i], thresholds[i + 1], u);
         }
-        gsap.set(pieces, { position: 'fixed', left: cx, top: cy, opacity: 1, scale: 0.3 });
 
-        const burst = gsap.timeline({ onComplete: () => pieces.forEach(p => p.remove()) });
-        pieces.forEach((p, idx) => {
-          const a = (idx / nPieces) * Math.PI * 2;
-          burst.to(p, {
-            left: cx + Math.cos(a) * 36,
-            top:  cy + Math.sin(a) * 36,
-            opacity: 0,
-            scale: 1,
-            duration: 0.45,
-            ease: 'power2.out',
-          }, 0);
-        });
+        // drive bar fill (force 100% at absolute bottom)
+        gsap.set(progress.current, { height: isBottom ? '100%' : `${t * 100}%` });
+
+        // pick highest threshold crossed → “bar reached this dot”
+        let crossed = 0;
+        for (let i = 0; i < thresholds.length; i++) {
+          if (t + 1e-4 >= thresholds[i]) crossed = i;
+        }
+
+        setActive(crossed);
+
+        if (crossed > lastCrossed) {
+          lastCrossed = crossed;
+        }
       };
 
-      // Drive the fill and handle crossings + active
-      gsap.to(progress.current, {
-        height: '100%',
-        ease: 'none',
-        scrollTrigger: {
-          trigger: document.scrollingElement || document.documentElement,
-          start: 'top top',
-          end: 'max', // full scroll distance
-          scrub: true,
-          onRefreshInit(self: ScrollTrigger) {
-            prevProgress = self.progress;
-            const idx = Math.max(0, Math.min(n - 1, Math.floor((self.progress + eps) * (n - 1))));
-            setActive(idx);
-          },
-          onRefresh(self: ScrollTrigger) {
-            prevProgress = self.progress;
-            const idx = Math.max(0, Math.min(n - 1, Math.floor((self.progress + eps) * (n - 1))));
-            setActive(idx);
-          },
-          onUpdate(self: ScrollTrigger) {
-            const p = Math.min(1, Math.max(0, self.progress));
-
-            // Sparkle only when going DOWN past a threshold
-            for (let i = 0; i < thresholds.length; i++) {
-              const t = thresholds[i];
-              if (prevProgress + eps < t && t <= p + eps) {
-                // mark it active first so hit() reads current scale correctly
-                setActive(i);
-                hit(i);
-              }
-            }
-
-            // Keep one active based on progress (prevents missing late dots)
-            const newActive = Math.max(0, Math.min(n - 1, Math.floor((p + eps) * (n - 1))));
-            setActive(newActive);
-
-            prevProgress = p;
-          },
-        },
+      const st = ScrollTrigger.create({
+        trigger: document.documentElement,
+        start: 'top top',
+        end: 'bottom bottom',
+        scrub: true,
+        onRefreshInit: () => { measure(); update(); },
+        onRefresh: () => { measure(); update(); },
+        onUpdate: update,
       });
+
+      const onResize = () => { measure(); update(); };
+      window.addEventListener('resize', onResize, { passive: true });
+
+      measure(); update();
+
+      return () => {
+        st.kill();
+        window.removeEventListener('resize', onResize);
+      };
     }, rail);
 
     return () => ctx.revert();
   }, [sections]);
 
   return (
-    <aside className="relative z-[60]">
-      {/* Wider column so labels have room */}
-      <div ref={rail} className="sticky top-0 h-screen w-32 flex items-center">
-        {/* 2-col grid: [3px bar | labels column] */}
-        <div className="relative mx-auto h-4/5 w-full grid grid-cols-[3px_1fr]">
-          {/* Bar column (3px) */}
+    <aside className="relative z-[60] hidden md:block">
+      {/* Fixed rail aligned to column; outer spans viewport but inner track is 80% height (like before) */}
+      <div ref={rail} className="fixed top-0 h-screen flex items-center pointer-events-none">
+        <div className="relative h-4/5 w-full grid grid-cols-[3px_1fr] pointer-events-auto">
+          {/* Track */}
           <div className="relative z-0">
             <div className="absolute inset-0 bg-white/15 rounded" />
             <div
@@ -163,23 +214,28 @@ export default function LeftRail({ sections }: { sections: SectionDef[] }) {
             />
           </div>
 
-          {/* Dots + labels column (above bar) */}
+          {/* Dots + labels */}
           <div className="relative z-10">
             <div className="absolute inset-0 flex flex-col justify-between py-1">
               {sections.map((s) => (
-                <div key={s.id} className="relative h-7">
-                  {/* Dot centered over the bar centerline:
-                      bar is 3px wide in the column to the LEFT; this column’s left edge is that boundary.
-                      Setting left:-1.5px and translateX(-50%) puts the dot’s center exactly on the bar center. */}
+                <div key={s.id} className="relative h-8">
+                  {/* Dot (clickable) */}
                   <div
+                    role="button"
+                    aria-label={`Scroll to ${s.label}`}
+                    onClick={() => scrollToSection(s.id)}
                     className="rail-dot absolute top-1/2 -translate-x-1/2 -translate-y-1/2
-                               h-3 w-3 rounded-full bg-white shadow z-20 ring-2 ring-black/20"
+                               h-3 w-3 rounded-full bg-white shadow z-20 ring-2 ring-black/20 cursor-pointer"
                     style={{ left: '-1.5px' }}
                   />
-                  {/* Label to the right; inline-block so transforms persist */}
+                  {/* Label (clickable) */}
                   <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => scrollToSection(s.id)}
+                    onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && scrollToSection(s.id)}
                     className="rail-label absolute left-5 top-1/2 -translate-y-1/2 inline-block
-                               text-[10px] font-medium text-white/70"
+                               text-[12px] font-medium text-white/70 cursor-pointer origin-left"
                   >
                     {s.label}
                   </span>

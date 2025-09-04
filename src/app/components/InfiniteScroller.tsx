@@ -1,7 +1,15 @@
+'use client';
+
 import { useEffect, useRef } from 'react';
+import * as React from 'react';
 
 type Speed = 'slow' | 'normal' | 'fast';
 type Direction = 'left' | 'right';
+
+// Extend CSSProperties to include our custom CSS var
+type CSSVars = React.CSSProperties & {
+  ['--duration']?: string;
+};
 
 export default function InfiniteScroller({
   items,
@@ -18,7 +26,10 @@ export default function InfiniteScroller({
   const innerRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reduce =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
     const scroller = scrollerRef.current;
     const inner = innerRef.current;
     if (!scroller || !inner) return;
@@ -36,20 +47,18 @@ export default function InfiniteScroller({
     });
   }, []);
 
-  const duration =
-    speed === 'slow' ? 60 : speed === 'fast' ? 20 : 40; // seconds
+  const duration = speed === 'slow' ? 60 : speed === 'fast' ? 20 : 40; // seconds
+
+  const style: CSSVars = {
+    '--duration': `${duration}s`,
+  };
 
   return (
     <div
       ref={scrollerRef}
       className={`scroller relative ${className}`}
       data-direction={direction}
-      style={
-        {
-          // @ts-ignore CSS var
-          '--duration': `${duration}s`,
-        } as React.CSSProperties
-      }
+      style={style}
     >
       <ul ref={innerRef} className="scroller__inner">
         {items.map((word, i) => (

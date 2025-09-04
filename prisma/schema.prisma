@@ -1,0 +1,29 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+  // (No previewFeatures needed)
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model AboutQA {
+  id        String    @id @default(cuid())
+  category  String
+  question  String    @unique
+  sources   String[]
+  weight    Int       @default(1)
+  answer    String?   @db.Text
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  vector    QAVector?
+}
+
+model QAVector {
+  qaId      String   @id
+  // pgvector column (managed via raw SQL)
+  embedding Unsupported("vector")
+  qa        AboutQA  @relation(fields: [qaId], references: [id], onDelete: Cascade)
+}

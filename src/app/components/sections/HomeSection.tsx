@@ -1,15 +1,23 @@
 'use client';
 
 import * as THREE from 'three';
-import React, { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, useGLTF, Html, Loader, useProgress, SoftShadows } from '@react-three/drei';
+import {
+  OrbitControls,
+  useGLTF,
+  Html,
+  Loader,
+  useProgress,
+  SoftShadows,
+} from '@react-three/drei';
+import type { OrbitControls as OrbitControlsImpl, GLTF } from 'three-stdlib';
 import HeroOverlay from '../HeroOverlay';
 import HeroCTAs from '../HeroCTAs';
 
 /** ===== Beam controls (pool size = angle + height; attenuation disabled) ===== */
-const BEAM_ANGLE_DEG = 45;  // you liked 45°
-const BEAM_HEIGHT    = 1.2; // light height above center in radii
+const BEAM_ANGLE_DEG = 45; // you liked 45°
+const BEAM_HEIGHT = 1.2; // light height above center in radii
 
 /** --- MODEL PATHS --- */
 const PATHS = {
@@ -23,16 +31,20 @@ const PATHS = {
 Object.values(PATHS).forEach((p) => useGLTF.preload(p));
 
 function GLB({ url }: { url: string }) {
-  const { scene } = useGLTF(url) as any;
+  // We only need the scene (THREE.Group). Drei's type is GLTF; narrow to scene.
+  const { scene } = useGLTF(url) as unknown as GLTF;
+
   useEffect(() => {
-    scene.traverse((o: any) => {
-      if (o.isMesh) {
-        o.castShadow = true;
-        o.receiveShadow = true;
-        // don't force FrontSide; thin meshes (screens) can be back-faced
+    // Traverse with typed Object3D; narrow meshes safely
+    scene.traverse((o: THREE.Object3D) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        m.castShadow = true;
+        m.receiveShadow = true;
       }
     });
   }, [scene]);
+
   return <primitive object={scene} />;
 }
 
@@ -40,8 +52,16 @@ function GLB({ url }: { url: string }) {
 function makeRadialAlphaTexture(size = 1024, inner = 0.22, outer = 1.0) {
   const c = document.createElement('canvas');
   c.width = c.height = size;
-  const ctx = c.getContext('2d')!;
-  const g = ctx.createRadialGradient(size/2, size/2, inner*size*0.5, size/2, size/2, outer*size*0.5);
+  const ctx = c.getContext('2d');
+  if (!ctx) return new THREE.CanvasTexture(c);
+  const g = ctx.createRadialGradient(
+    size / 2,
+    size / 2,
+    inner * size * 0.5,
+    size / 2,
+    size / 2,
+    outer * size * 0.5,
+  );
   g.addColorStop(0, 'rgba(255,255,255,1)');
   g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g;
@@ -52,7 +72,13 @@ function makeRadialAlphaTexture(size = 1024, inner = 0.22, outer = 1.0) {
   return tex;
 }
 
-function InfiniteFloorAtGroup({ group, radius = 45 }: { group: React.MutableRefObject<THREE.Group | null>; radius?: number }) {
+function InfiniteFloorAtGroup({
+  group,
+  radius = 45,
+}: {
+  group: React.MutableRefObject<THREE.Group | null>;
+  radius?: number;
+}) {
   const alphaMap = useMemo(() => makeRadialAlphaTexture(1024, 0.22, 1.0), []);
   const meshRef = useRef<THREE.Mesh>(null);
 
@@ -67,7 +93,12 @@ function InfiniteFloorAtGroup({ group, radius = 45 }: { group: React.MutableRefO
   });
 
   return (
-    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]} receiveShadow castShadow={false}>
+    <mesh
+      ref={meshRef}
+      rotation={[-Math.PI / 2, 0, 0]}
+      receiveShadow
+      castShadow={false}
+    >
       <circleGeometry args={[radius, 128]} />
       <meshStandardMaterial
         color="#141414"
@@ -83,39 +114,51 @@ function InfiniteFloorAtGroup({ group, radius = 45 }: { group: React.MutableRefO
 }
 
 /** --- Helper: shape spotlight tightly around a group (no attenuation) --- */
-function shapeTightSpot(l: THREE.SpotLight, group: React.MutableRefObject<THREE.Group | null>, scene: THREE.Scene) {
+function shapeTightSpot(
+  l: THREE.SpotLight,
+  group: React.MutableRefObject<THREE.Group | null>,
+  scene: THREE.Scene,
+) {
   if (!group.current) return;
   if (l.target && !l.target.parent) scene.add(l.target);
 
   const box = new THREE.Box3().setFromObject(group.current);
   if (box.isEmpty()) return;
   const s = box.getBoundingSphere(new THREE.Sphere());
-  const c = s.center; const r = Math.max(0.001, s.radius);
+  const c = s.center;
+  const r = Math.max(0.001, s.radius);
 
   l.position.set(c.x + r * 0.1, c.y + r * BEAM_HEIGHT, c.z + r * 0.4);
   l.target.position.copy(c);
   l.target.updateMatrixWorld(true);
 
-  l.angle    = THREE.MathUtils.degToRad(BEAM_ANGLE_DEG);
-  l.decay    = 2;
+  l.angle = THREE.MathUtils.degToRad(BEAM_ANGLE_DEG);
+  l.decay = 2;
   l.distance = 0; // disable attenuation → pool = angle + height
 
-  // Shadow stability (PCF/PCSS-friendly)
-  const sh: any = l.shadow;
-  if (sh?.camera) {
-    sh.camera.near = Math.max(0.05, r * 0.05);
-    sh.camera.far  = r * 6.0;
-    sh.camera.updateProjectionMatrix?.();
-  }
-  if ('radius' in sh) sh.radius = 3; // PCF blur radius
+  // Shadow stability
+  const sh = l.shadow as THREE.LightShadow;
+  const cam = sh.camera as THREE.PerspectiveCamera | THREE.OrthographicCamera;
+  cam.near = Math.max(0.05, r * 0.05);
+  cam.far = r * 6.0;
+  cam.updateProjectionMatrix();
+  // radius exists on LightShadow in recent three versions
+  (sh as THREE.LightShadow & { radius?: number }).radius = 3;
   l.shadow.bias = -0.0005;
   l.shadow.normalBias = 0.1;
 }
 
 /** --- FLICKER SPOTLIGHT --- */
-function FlickerSpot({ group, active, loops = 3, onEnd }: {
+function FlickerSpot({
+  group,
+  active,
+  loops = 3,
+  onEnd,
+}: {
   group: React.MutableRefObject<THREE.Group | null>;
-  active: boolean; loops?: number; onEnd?: () => void;
+  active: boolean;
+  loops?: number;
+  onEnd?: () => void;
 }) {
   const ref = useRef<THREE.SpotLight>(null);
   const t0 = useRef<number | null>(null);
@@ -123,8 +166,8 @@ function FlickerSpot({ group, active, loops = 3, onEnd }: {
   const { clock, scene } = useThree();
 
   const keys: [number, number][] = [
-    [0.00, 0],
-    [0.10, 360],
+    [0.0, 0],
+    [0.1, 360],
     [0.16, 0],
     [0.35, 500],
     [0.42, 0],
@@ -143,7 +186,12 @@ function FlickerSpot({ group, active, loops = 3, onEnd }: {
 
     shapeTightSpot(l, group, scene);
 
-    if (!active) { l.intensity = 0; t0.current = null; done.current = false; return; }
+    if (!active) {
+      l.intensity = 0;
+      t0.current = null;
+      done.current = false;
+      return;
+    }
 
     const now = clock.getElapsedTime();
     if (t0.current === null) t0.current = now;
@@ -151,13 +199,18 @@ function FlickerSpot({ group, active, loops = 3, onEnd }: {
 
     if (t >= loops * loopDur) {
       l.intensity = 0;
-      if (!done.current) { done.current = true; onEnd?.(); }
+      if (!done.current) {
+        done.current = true;
+        onEnd?.();
+      }
       return;
     }
 
     const lt = t % loopDur;
-    let i = 0; while (i < keys.length - 1 && lt > keys[i + 1][0]) i++;
-    const [t0k, v0] = keys[i]; const [t1k, v1] = keys[i + 1];
+    let i = 0;
+    while (i < keys.length - 1 && lt > keys[i + 1][0]) i++;
+    const [t0k, v0] = keys[i];
+    const [t1k, v1] = keys[i + 1];
     const u = THREE.MathUtils.clamp((lt - t0k) / (t1k - t0k), 0, 1);
     const base = THREE.MathUtils.lerp(v0, v1, u);
     l.intensity = Math.max(0, base + 0.8 * Math.sin(now * 60));
@@ -178,7 +231,10 @@ function FlickerSpot({ group, active, loops = 3, onEnd }: {
 }
 
 /** --- STEADY LIGHT (tight beam, no attenuation) --- */
-function SteadyLight({ group, intensity = 700 }: {
+function SteadyLight({
+  group,
+  intensity = 700,
+}: {
   group: React.MutableRefObject<THREE.Group | null>;
   intensity?: number;
 }) {
@@ -209,14 +265,22 @@ function SteadyLight({ group, intensity = 700 }: {
 }
 
 /** --- Small non-shadowing fill (lifts crushed blacks lightly) --- */
-function GentleFill({ group, intensity = 28 }: { group: React.MutableRefObject<THREE.Group | null>; intensity?: number }) {
+function GentleFill({
+  group,
+  intensity = 28,
+}: {
+  group: React.MutableRefObject<THREE.Group | null>;
+  intensity?: number;
+}) {
   const ref = useRef<THREE.PointLight>(null);
   useFrame(() => {
-    const l = ref.current; if (!l || !group.current) return;
+    const l = ref.current;
+    if (!l || !group.current) return;
     const box = new THREE.Box3().setFromObject(group.current);
     if (box.isEmpty()) return;
     const s = box.getBoundingSphere(new THREE.Sphere());
-    const c = s.center; const r = s.radius;
+    const c = s.center;
+    const r = s.radius;
     l.position.set(c.x + r * 0.4, c.y + r * 0.7, c.z + r * 1.4);
     l.intensity = intensity;
     l.distance = r * 1.6;
@@ -227,10 +291,19 @@ function GentleFill({ group, intensity = 28 }: { group: React.MutableRefObject<T
 
 /** --- Camera distance lock: recomputes when models become available --- */
 function CameraDistanceLock({
-  group, margin = 1.25, distK = 1.2,
-}: { group: React.MutableRefObject<THREE.Group | null>; margin?: number; distK?: number }) {
+  group,
+  margin = 1.25,
+  distK = 1.2,
+}: {
+  group: React.MutableRefObject<THREE.Group | null>;
+  margin?: number;
+  distK?: number;
+}) {
   const camera = useThree((s) => s.camera as THREE.PerspectiveCamera);
-  const controls = useThree((s: any) => s.controls);
+  // Drei stores controls in the internal state; type it to OrbitControlsImpl | undefined
+  const controls = useThree(
+    (s) => (s as unknown as { controls?: OrbitControlsImpl }).controls,
+  );
   const baseDist = useRef(0);
   const center = useRef(new THREE.Vector3());
   const ready = useRef(false);
@@ -254,7 +327,9 @@ function CameraDistanceLock({
     if (controls?.target) controls.target.copy(center.current);
 
     const dir = camera.position.clone().sub(tgt).normalize();
-    camera.position.copy(center.current).addScaledVector(dir.length() ? dir : new THREE.Vector3(0,0,1), desired);
+    camera.position
+      .copy(center.current)
+      .addScaledVector(dir.length() ? dir : new THREE.Vector3(0, 0, 1), desired);
     camera.updateProjectionMatrix();
     if (controls) {
       controls.enableZoom = false;
@@ -291,11 +366,16 @@ export default function HomeSection() {
   const [phase, setPhase] = useState<'loading' | 'flicker' | 'steady'>('loading');
   const [dbg, setDbg] = useState(false); // emergency light toggle (optional)
 
-  useEffect(() => { if (!active && phase === 'loading') setPhase('flicker'); }, [active, phase]);
+  useEffect(() => {
+    if (!active && phase === 'loading') setPhase('flicker');
+  }, [active, phase]);
+
   useEffect(() => {
     if (phase !== 'loading') return;
-    const id = setTimeout(() => setPhase((p) => (p === 'loading' ? 'flicker' : p)), 4000);
-    return () => clearTimeout(id);
+    const id = window.setTimeout(() => {
+      setPhase((p) => (p === 'loading' ? 'flicker' : p));
+    }, 4000);
+    return () => window.clearTimeout(id);
   }, [phase]);
 
   useEffect(() => {
@@ -304,13 +384,17 @@ export default function HomeSection() {
       if (k === 'r') setPhase('flicker');
       if (k === 'd') setDbg((v) => !v);
     };
-    window.addEventListener('keydown', onKey, { capture: true });
-    return () => window.removeEventListener('keydown', onKey, { capture: true } as any);
+    const opts: AddEventListenerOptions = { capture: true };
+    window.addEventListener('keydown', onKey, opts);
+    return () => window.removeEventListener('keydown', onKey, opts);
   }, []);
 
   return (
     // Section-sized hero so it aligns with your left rail layout
-    <section id="hero" className="relative min-h-[80vh] md:min-h-[90vh] w-full overflow-hidden bg-black">
+    <section
+      id="hero"
+      className="relative min-h-[80vh] md:min-h-[90vh] w-full overflow-hidden bg-black"
+    >
       <div className="absolute inset-0 z-0">
         <Canvas
           className="absolute inset-0 w-full h-full"
@@ -319,14 +403,14 @@ export default function HomeSection() {
           gl={{ antialias: true }}
           camera={{ fov: 35, near: 0.1, far: 5000 }}
           onCreated={({ gl, scene }) => {
+            // WebGLRenderer types include these
             gl.toneMapping = THREE.ACESFilmicToneMapping;
-            (gl as any).toneMappingExposure = 1.85;
-            gl.outputColorSpace = THREE.SRGBColorSpace as any;
+            gl.toneMappingExposure = 1.85;
+            gl.outputColorSpace = THREE.SRGBColorSpace;
             gl.shadowMap.enabled = true;
-            gl.shadowMap.type = THREE.PCFSoftShadowMap as any; // PCF soft (pairs with <SoftShadows/>)
-            (gl as any).physicallyCorrectLights = false;
-            (scene as any).environment = null;
-            (scene as any).environmentIntensity = 0;
+            gl.shadowMap.type = THREE.PCFSoftShadowMap;
+            // avoid setting non-existent scene props (environmentIntensity)
+            scene.environment = null;
             scene.background = new THREE.Color(0x000000);
             gl.setClearColor(0x000000, 1);
           }}
@@ -338,7 +422,7 @@ export default function HomeSection() {
             makeDefault
             enableDamping
             dampingFactor={0.08}
-            enableZoom={false}                                   // lock user zoom
+            enableZoom={false} // lock user zoom
             minPolarAngle={THREE.MathUtils.degToRad(0)}
             maxPolarAngle={Math.PI / 2}
           />
@@ -359,7 +443,14 @@ export default function HomeSection() {
             <InfiniteFloorAtGroup group={models} radius={45} />
           </Suspense>
 
-          {phase === 'flicker' && <FlickerSpot group={models} active loops={3} onEnd={() => setPhase('steady')} />}
+          {phase === 'flicker' && (
+            <FlickerSpot
+              group={models}
+              active
+              loops={3}
+              onEnd={() => setPhase('steady')}
+            />
+          )}
           {phase === 'steady' && (
             <>
               <SteadyLight group={models} intensity={700} />
@@ -370,23 +461,33 @@ export default function HomeSection() {
           {/* Optional: emergency debug light */}
           {dbg && (
             <>
-              <directionalLight position={[8, 12, 8]} intensity={3.0} castShadow shadow-mapSize={[2048, 2048]} />
+              <directionalLight
+                position={[8, 12, 8]}
+                intensity={3.0}
+                castShadow
+                shadow-mapSize={[2048, 2048]}
+              />
               <ambientLight intensity={0.15} />
             </>
           )}
         </Canvas>
 
-
         {/* Loader covers only the hero area */}
         <Loader
-          containerStyles={{ background: '#000', position: 'absolute', inset: 0, pointerEvents: 'none' }}
+          containerStyles={{
+            background: '#000',
+            position: 'absolute',
+            inset: 0,
+            pointerEvents: 'none',
+          }}
           innerStyles={{ borderRadius: 8 }}
           barStyles={{ background: '#fff' }}
           dataStyles={{ color: '#fff', fontSize: 12 }}
         />
 
-		<HeroOverlay />
-		<HeroCTAs />
+        <HeroOverlay />
+        <HeroCTAs />
+        <div data-rail-anchor data-rail-offset="40vh" className="pointer-events-none select-none sr-only" />
       </div>
     </section>
   );

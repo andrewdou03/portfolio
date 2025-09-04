@@ -10,10 +10,10 @@ import { Loader2, Send, Sparkles, Download, MessageSquare } from 'lucide-react';
 type ChatMessage = { id: string; role: 'user' | 'assistant' | 'system'; content: string };
 
 const SUGGESTIONS = [
-  'How do you approach performance in R3F?',
-  'Show me projects with heavy animation.',
-  'What’s your GSAP + ScrollTrigger experience?',
-  'How do you blend design + code?',
+  'Can you give me an example of collaborating with designers or backend developers?',
+  'How do you keep 3D-heavy websites performant?',
+  'What are some basic facts about yourself?',
+  'Which project best shows your ability to handle both frontend and full-stack tasks?',
 ];
 
 export default function AboutSection() {
@@ -81,7 +81,7 @@ export default function AboutSection() {
           transition={{ duration: 0.5 }}
           className="text-center"
         >
-          <h2 className="text-4xl md:text-5xl font-semibold tracking-tight text-white">About Me</h2>
+          <h2 data-rail-anchor className="text-4xl md:text-5xl font-semibold tracking-tight text-white">About Me</h2>
           <p className="mt-3 text-white/80 max-w-2xl mx-auto">
             Front-end & creative developer focused on Next.js, React Three Fiber/Three.js, and animation.
             I build immersive, performant interfaces with a strong UX foundation.

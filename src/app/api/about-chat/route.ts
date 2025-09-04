@@ -1,39 +1,125 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { prisma } from "@/lib/prisma";
+import { embed } from "@/lib/embeddings";
 
-export const runtime = "nodejs"; // or 'edge' if you prefer; swap to the Edge client accordingly
+// Shared helper to convert embedding vector to SQL string
+const toVectorText = (arr: number[]) => `[${arr.join(",")}]`;
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Type representing a search result with similarity
+type QAItem = {
+  id: string;
+  category: string;
+  question: string;
+  answer: string | null;
+  sources: string[];
+  similarity: number;
+};
 
-// IMPORTANT: set this to your custom GPT's model ID in .env.local
-// e.g. ABOUT_GPT_MODEL_ID=gpt-4.1-mini or gpt-4o-mini or your GPT's ID
-const MODEL = process.env.ABOUT_GPT_MODEL_ID!;
+type ChatMessage = {
+  role: "user" | "assistant" | "system";
+  content: string;
+};
 
-// Optional: a strict system prompt to constrain scope & voice.
-const SYSTEM = `
-You are the portfolio owner's AI assistant answering in first person as "I".
-Stay factual and concise. Topics allowed: skills, experience, projects, tools, process, availability.
-If asked something outside scope, redirect politely and suggest viewing the resume or contacting me. Do not under any circumstance hallucinate details or make things up.
-Tone: friendly, professional, confident.
-`;
+async function semantic(query: string, k: number): Promise<QAItem[] | null> {
+  const qvec = await embed(query);
+  if (!qvec) return null;
+
+  const vecText = toVectorText(qvec);
+
+  const items = await prisma.$queryRawUnsafe<QAItem[]>(
+    `
+    SELECT q.id, q.category, q.question, q.answer, q.sources,
+           1 - (v.embedding <=> CAST($1 AS vector)) AS similarity
+    FROM "QAVector" v
+    JOIN "AboutQA" q ON q.id = v."qaId"
+    WHERE q.answer IS NOT NULL
+    ORDER BY v.embedding <=> CAST($1 AS vector) ASC
+    LIMIT $2
+    `,
+    vecText,
+    Number(k)
+  );
+
+  return items;
+}
+
+async function keyword(query: string, k: number): Promise<QAItem[]> {
+  const rows = await prisma.aboutQA.findMany({
+    where: {
+      answer: { not: null },
+      OR: [
+        { question: { contains: query, mode: "insensitive" } },
+        { answer: { contains: query, mode: "insensitive" } },
+      ],
+    },
+    take: k,
+    orderBy: { updatedAt: "desc" },
+  });
+
+  return rows.map(
+    (r): QAItem => ({
+      id: r.id,
+      category: r.category,
+      question: r.question,
+      answer: r.answer ?? null,
+      sources: r.sources,
+      similarity: 0.5,
+    })
+  );
+}
+
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+const CHAT_MODEL = process.env.ABOUT_GPT_MODEL_ID ?? "gpt-4o-mini";
 
 export async function POST(req: NextRequest) {
-  try {
-    const { messages } = (await req.json()) as {
-      messages: { role: "user" | "assistant" | "system"; content: string }[];
-    };
+  const { messages }: { messages: ChatMessage[] } = await req.json();
 
-    const result = await client.chat.completions.create({
-      model: MODEL,
-      messages: [{ role: "system", content: SYSTEM }, ...(messages ?? [])],
-      temperature: 0.3,
-    });
+  const lastUser =
+    [...(messages ?? [])].reverse().find((m) => m.role === "user")?.content ??
+    "";
 
-    const content =
-      result.choices[0]?.message?.content ?? "Sorry, no response.";
-    return NextResponse.json({ content });
-  } catch (err: any) {
-    console.error("[about-chat]", err);
-    return NextResponse.json({ error: "failed" }, { status: 500 });
-  }
+  const k = 6;
+  const retrieved =
+    (await semantic(lastUser, k)) ?? (await keyword(lastUser, k));
+
+  const facts = (retrieved ?? [])
+    .map(
+      (i, idx) =>
+        `#${idx + 1} [${i.category}]\nQ: ${i.question}\nA: ${i.answer}`
+    )
+    .join("\n\n");
+
+  const SYSTEM = `
+You are the portfolio owner's assistant. Answer in FIRST PERSON as "I".
+Paraphrase raw notes into clear, interview-ready answers.
+
+Rules:
+- Be concise (3–6 sentences) unless asked for more.
+- Prefer the provided FACTS. Do NOT invent details.
+- Emphasize: impact → approach → tools → outcome.
+- Include concrete numbers/dates/tools if present.
+- If not covered, say so briefly and suggest resume/contact. Do not hallucinate.
+- If asked about previous work, answer and when referencing the portfolio remember that the user is currently on the portfolio site so direct them down to the work section.
+- Tone: professional, warm, no buzzword salad.
+`;
+
+  const CONTEXT = facts
+    ? `FACTS (my raw notes — paraphrase these, don't copy verbatim):\n\n${facts}`
+    : `No prior facts found for this topic.`;
+
+  const completion = await client.chat.completions.create({
+    model: CHAT_MODEL,
+    temperature: 0.4,
+    messages: [
+      { role: "system", content: SYSTEM },
+      { role: "system", content: CONTEXT },
+      ...(messages ?? []),
+    ],
+  });
+
+  const content =
+    completion.choices[0]?.message?.content ?? "Sorry, no response.";
+
+  return NextResponse.json({ content });
 }

@@ -1,6 +1,8 @@
 'use client';
 
-import AnimatedCard, { Project } from '../AnimatedCard'; // adjust path
+import * as React from 'react';
+import { motion, useReducedMotion, type Variants, type Transition } from 'framer-motion';
+import AnimatedCard, { Project } from '../AnimatedCard';
 
 const PROJECTS: Project[] = [
   {
@@ -11,6 +13,7 @@ const PROJECTS: Project[] = [
     tools: ['Next.js', 'React', 'TypeScript', 'PostgreSQL', 'Prisma', 'OAuth', 'Stripe/Paypal', 'Shadcn UI', 'Tailwind'],
     skills: ['Full Stack Development', 'Authentication/Admin Functionality'],
     shot: '/images/NextStorePreview.png',
+    url: 'https://nextjs-ecommerce-store-henna.vercel.app'
   },
   {
     id: 'proj-2',
@@ -20,6 +23,7 @@ const PROJECTS: Project[] = [
     tools: ['Next.js', 'GSAP', 'Three.js', 'React Three Fiber', 'Tailwind', 'Shadcn UI', 'Blender'],
     skills: ['UX design', '3D Modeling', 'Animation'],
     shot: '/images/portfolioPreview.png',
+    url: '/'
   },
   {
     id: 'proj-3',
@@ -29,6 +33,7 @@ const PROJECTS: Project[] = [
     tools: ['React', 'Express', 'MongoDB', 'Node.js', 'Tailwind'],
     skills: ['Full Stack Development', 'Authentication/Admin Functionality'],
     shot: '/images/proShopPreview.png',
+    url: 'https://proshop-6eqh.onrender.com'
   },
   {
     id: 'proj-4',
@@ -38,6 +43,7 @@ const PROJECTS: Project[] = [
     tools: ['Next.js', 'Three.js', 'React Three Fiber', 'GLSL'],
     skills: ['Shader Programming', 'Animation'],
     shot: '/images/hologramPreview.png',
+    url: 'https://morphing-holograms.vercel.app/'
   },
   {
     id: 'proj-5',
@@ -47,6 +53,7 @@ const PROJECTS: Project[] = [
     tools: ['Next.js', 'Three.js', 'React Three Fiber', 'GLSL'],
     skills: ['Shader Programming', 'Animation'],
     shot: '/images/earthDiagramPreview.png',
+    url: 'https://earth-diagram.vercel.app'
   },
   {
     id: 'proj-6',
@@ -56,25 +63,66 @@ const PROJECTS: Project[] = [
     tools: ['JS', 'HTML', 'CSS', 'TMDB API'],
     skills: ['Frontend Development', 'API Integration'],
     shot: '/images/flixxPreview.png',
-  },
+    url: 'https://flixx-movie-app-beryl.vercel.app'
+  }
 ];
 
 export default function WorkSection() {
+  const prefersReduced = useReducedMotion();
+
+  // Type-safe easing (cubic-bezier)
+  const easeOut: Transition['ease'] = [0.16, 1, 0.3, 1];
+
+  const headerVar: Variants = {
+    hidden: { opacity: 0, y: prefersReduced ? 0 : 8 },
+    show:   { opacity: 1, y: 0, transition: { duration: 0.5, ease: easeOut } },
+  };
+
+  const listVar: Variants = {
+    hidden: {},
+    show: {
+      transition: {
+        staggerChildren: 0.08,
+        delayChildren: 0.05,
+      },
+    },
+  };
+
+  const itemVar: Variants = {
+    hidden: { opacity: 0, y: prefersReduced ? 0 : 10 },
+    show:   { opacity: 1, y: 0, transition: { duration: 0.45, ease: easeOut } },
+  };
+
   return (
     <section id="work" className="min-h-screen py-24">
-      <div className="mb-8 text-center">
-        <h2 className="text-4xl font-semibold text-white">Work</h2>
-        <p className="mt-2 max-w-prose text-white">
-          Cards expand when they cross the center of the viewport.
+      <motion.div
+        className="mb-8 mx-auto max-w-4xl text-center"
+        variants={headerVar}
+        initial="hidden"
+        whileInView="show"
+        viewport={{ once: true, amount: 0.5 }}
+      >
+        <h2 data-rail-anchor className="text-4xl md:text-5xl font-semibold tracking-tight text-white">Work</h2>
+        <p className="mt-2 mx-auto max-w-prose text-white">
+          Click a card to expand and see details.
         </p>
-      </div>
+      </motion.div>
 
-      <div className="space-y-5">
+      <motion.div
+        className="space-y-5"
+        variants={listVar}
+        initial="hidden"
+        whileInView="show"
+        viewport={{ once: true, amount: 0.2 }}
+      >
         {PROJECTS.map((p) => (
-          <AnimatedCard key={p.id} project={p} />
+          <motion.div key={p.id} variants={itemVar}>
+            <AnimatedCard project={p} />
+          </motion.div>
         ))}
-        <div className="h-[60vh]" />
-      </div>
+      </motion.div>
+
+      <div className="h-[40vh]" />
     </section>
   );
 }

@@ -5,10 +5,10 @@ import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 
 import LeftRail from './components/LeftRail';
-import Section from './components/Section';
-import WorkSection from './components/sections/WorkSection2';
+import WorkSection from './components/sections/WorkSection';
 import HomeSection from './components/sections/HomeSection';
 import AboutSection from './components/sections/AboutSection';
+import ContactSection from './components/sections/ContactSection';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -16,7 +16,7 @@ const SECTIONS = [
   { id: 'hero',    label: 'Intro',   bg: '#000000' },
   { id: 'about',   label: 'About',   bg: '#000000' },
   { id: 'work',    label: 'Work',    bg: '#000000' },
-  { id: 'contact', label: 'Contact', bg: '#f1a753' },
+  { id: 'contact', label: 'Contact', bg: '#000000' },
 ];
 
 export default function Page() {
@@ -82,35 +82,32 @@ export default function Page() {
         className="fixed inset-0 -z-10 transition-colors"
         style={{ background: SECTIONS[0].bg }}
       />
-
       <div className="container mx-auto px-6">
-        <div className="grid grid-cols-[64px_1fr] gap-6">
-          {/* Left rail only needs id/label */}
-          <LeftRail sections={SECTIONS.map(({ id, label }) => ({ id, label }))} />
+  {/* was: grid grid-cols-[64px_1fr] gap-6 */}
+  <div className="grid grid-cols-1 md:grid-cols-[80px_1fr] gap-0 md:gap-6">
+    {/* Hide rail on mobile */}
+    <div className="hidden md:block relative">
+      <LeftRail sections={SECTIONS.map(({ id, label }) => ({ id, label }))} />
+    </div>
 
-          <div>
-            {/* Render each section; replace 'work' with the WorkSection component */}
-            {SECTIONS.map((s) =>
+    <div>
+      {SECTIONS.map((s) =>
               s.id === 'work' ? (
                 <WorkSection key="work" />
               ) : s.id === 'hero' ? (
                 <HomeSection key="hero" />
               ) : s.id === 'about' ? (
                 <AboutSection key="about" />
-              ) : (
-                <Section key={s.id} id={s.id} label={s.label}>
-                  <div className="max-w-2xl">
-                    <h2 className="text-5xl font-bold mb-4">{s.label}</h2>
-                    <p className="text-white">
-                      Lorem ipsum dolor sit amet, section {s.label}. Add content here.
-                    </p>
-                  </div>
-                </Section>
-              )
-            )}
-          </div>
-        </div>
-      </div>
+              ) : 
+              s.id === 'contact' ? (
+                <ContactSection key="contact" />
+              ) :
+              null
+      )}
+    </div>
+  </div>
+</div>
+
     </main>
   );
 }
