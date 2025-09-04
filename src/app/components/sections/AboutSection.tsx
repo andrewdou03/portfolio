@@ -88,7 +88,7 @@ export default function AboutSection() {
           </p>
           <div className="mt-5 flex items-center justify-center gap-3">
             <Button asChild variant="secondary" className="rounded-full">
-              <a href="/resume.pdf" target="_blank" rel="noreferrer">
+              <a href="/assets/resume.pdf" target="_blank" rel="noreferrer">
                 <Download className="mr-2 h-4 w-4" /> View Resume
               </a>
             </Button>
