@@ -153,7 +153,8 @@ export default function LeftRail({ sections }: { sections: SectionDef[] }) {
           t = thresholds[thresholds.length - 1];
         } else {
           let i = 0;
-          while (i < anchors.length - 1 && !(anchors[i].y <= midY && midY < anchors[i + 1].y)) i++;
+          while (i < anchors.length - 1 && !(anchors[i].y <= midY && midY < anchors[i + 1].y)) 
+          i++;
           const a0 = anchors[i], a1 = anchors[i + 1];
           const u = (midY - a0.y) / Math.max(1, (a1.y - a0.y)); // 0..1
           t = gsap.utils.interpolate(thresholds[i], thresholds[i + 1], u);
