@@ -23,6 +23,6 @@
     },
     "types": ["@types/node", "@types/react", "@types/react-dom", "@react-three/fiber"]
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "types/**/*.d.ts", "instrumentation.js"],
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "types/**/*.d.ts", "instrumentation-client.ts"],
   "exclude": ["node_modules"]
 }

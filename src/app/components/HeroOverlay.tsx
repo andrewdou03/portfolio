@@ -1,9 +1,12 @@
 'use client';
 import InfiniteScroller from './InfiniteScroller';
-import { useFeatureFlagVariantKey } from 'posthog-js/react';
+import { useFeatureFlagVariantKey} from 'posthog-js/react';
 
 export default function HeroOverlay() {
   const titleVariant = useFeatureFlagVariantKey('hero-title-test');
+  
+  // Debug logging
+  console.log('Feature flag value:', titleVariant);
 
   return (
     <div
@@ -22,7 +25,7 @@ export default function HeroOverlay() {
         <span>Andrew Dou</span>
         <span className="mx-3 text-white/40">|</span>
         <span>
-          {titleVariant === 'test' ? 'Web Designer + Development' : 'Creative Web Developer'}
+          {titleVariant === 'test' ? 'Web Designer & Developer' : 'Creative Web Developer'}
         </span>
       </h1>
 
